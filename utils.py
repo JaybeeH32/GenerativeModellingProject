@@ -4,8 +4,11 @@ import torch
 
 
 
-def get_blur_physics(sigma, device):
-    kernel = torch.tensor(np.loadtxt("kernel8.txt"), dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(device)
+def get_blur_physics(sigma, device, random_filter=False):
+    if random_filter:
+        kernel = torch.randn(1, 1, 256, 256)
+    else:
+        kernel = torch.tensor(np.loadtxt("kernel8.txt"), dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(device)
     physics = dinv.physics.Blur(
         filter=kernel,
         device=device,
