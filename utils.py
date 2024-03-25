@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
-from PMCPnP import PMCPnP
+from Models import PMCPnP, PMCPnPAnnealing, PMCReD, PMCReDAnnealing
 
 def get_image(data_directory, *, name='face1', img_size=256, device='cpu'):
     """ Possible images are 'face1', 'face2', 'face3', 'bedroom', 'butterfly' 
@@ -26,12 +26,11 @@ def get_blur_physics(img_size, sigma, device, random_filter=False):
 
 def get_inpainting_physics(img_size, sigma, device, mask_random=True):
     if mask_random:
-        mask = 0.5
+        mask = 0.6
     else:
         hole_size = 60
-        mask = torch.ones(img_size, img_size)
+        mask = torch.ones(img_size, img_size, device=device)
         mask[(img_size - hole_size)//2:(img_size + hole_size)//2, (img_size - hole_size)//2:(img_size + hole_size)//2] = torch.zeros(hole_size, hole_size)
-        mask.to(device)
         
     physics = dinv.physics.Inpainting(
         mask=mask,
@@ -70,6 +69,7 @@ def get_compressed_sensing_physics(img_size, sigma, device, factor=10):
         m=3 * img_size * img_size // factor // factor,
         img_shape=(3, img_size, img_size),
         device=device,
+        fast=True,
         noise_model=dinv.physics.GaussianNoise(sigma=sigma),
     )
     return physics
@@ -124,7 +124,7 @@ def get_model(model_name, denoiser, likelihood, max_iter=100, stepsize=1e-3, lam
         model = dinv.sampling.DPS(
             denoiser,
             data_fidelity=likelihood,
-            max_iter=1000,
+            max_iter=max_iter,
             verbose=True,
             device=device,
             save_iterates=False,
@@ -140,7 +140,56 @@ def get_model(model_name, denoiser, likelihood, max_iter=100, stepsize=1e-3, lam
             sigma=sigma,
             gamma=stepsize,
         )
+    
+    elif model_name == 'PMCReD':
+        model = PMCReD(
+            prior=dinv.optim.ScorePrior(denoiser=denoiser).to(device),
+            data_fidelity=likelihood,
+            max_iter=max_iter,
+            verbose=True,
+            alpha=1,
+            sigma=sigma,
+            gamma=stepsize,
+        )
+    
+    elif model_name == 'PMCPnPAnnealing':
+        model = PMCPnPAnnealing(
+            prior=dinv.optim.ScorePrior(denoiser=denoiser).to(device),
+            data_fidelity=likelihood,
+            max_iter=max_iter,
+            verbose=True,
+            alphas=exponential_decay_alpha(10, 1, max_iter),
+            sigmas=exponential_decay_sigma(10, sigma, max_iter),
+            gamma=stepsize,
+        )
+    
+    elif model_name == 'PMCReDAnnealing':
+        model = PMCReDAnnealing(
+            prior=dinv.optim.ScorePrior(denoiser=denoiser).to(device),
+            data_fidelity=likelihood,
+            max_iter=max_iter,
+            verbose=True,
+            alphas=exponential_decay_alpha(10, 1, max_iter),
+            sigmas=exponential_decay_sigma(10, sigma, max_iter),
+            gamma=stepsize,
+        )
+        
     else:
         raise ValueError(f"Model {model_name} not implemented")
     return model
+
+def exponential_decay_alpha(alpha_0, alpha_final, iterations):
+    # decay_rate = 1 / alpha_0
+    decay_rate = .975
+    t_values = torch.arange(0, iterations, dtype=torch.float32)
+    alphas = alpha_0 * (decay_rate ** t_values)
+    alphas[alphas < alpha_final] = alpha_final
+    return alphas
+
+def exponential_decay_sigma(sigma_0, sigma_final, iterations):
+    decay_rate = .975
+    t_values = torch.arange(0, iterations, dtype=torch.float32)
+    sigmas = sigma_0 * (decay_rate ** t_values)
+    sigmas[sigmas < sigma_final] = sigma_final
+    return sigmas
     
