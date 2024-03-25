@@ -26,7 +26,7 @@ def get_blur_physics(img_size, sigma, device, random_filter=False):
 
 def get_inpainting_physics(img_size, sigma, device, mask_random=True):
     if mask_random:
-        mask = 0.6
+        mask = 0.8
     else:
         hole_size = 60
         mask = torch.ones(img_size, img_size, device=device)
